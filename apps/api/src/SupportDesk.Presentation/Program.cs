@@ -4,6 +4,7 @@ using SupportDesk.Infrastructure;
 using SupportDesk.Presentation.Extensions;
 using SupportDesk.Presentation.Filters;
 using SupportDesk.Presentation.Middleware;
+using SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,6 +30,14 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+var slaOptions = builder.Configuration
+    .GetSection("Sla")
+    .Get<TicketTriageOptions>()
+    ?? throw new InvalidOperationException(
+        "The Sla configuration section is missing.");
+
+builder.Services.AddSingleton(slaOptions);
 
 var app = builder.Build();
 

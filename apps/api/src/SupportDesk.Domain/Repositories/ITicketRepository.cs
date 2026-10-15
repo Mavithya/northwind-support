@@ -15,4 +15,7 @@ public interface ITicketRepository
     Task<string> NextReferenceAsync(CancellationToken ct);
 
     Task AddAsync(Ticket ticket, CancellationToken ct);
+
+    Task<IReadOnlyDictionary<int, int>> GetOpenTicketCountsByAgentAsync(
+        CancellationToken ct);
 }

@@ -34,6 +34,8 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssemblyContaining<RaiseTicketCommandHandler>(ServiceLifetime.Singleton);
 
+        services.AddScoped<TicketTriageService>();
+        
         return services;
     }
 }
