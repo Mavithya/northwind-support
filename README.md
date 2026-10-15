@@ -98,6 +98,31 @@ Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict o
 **Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
 and 40 tickets across every status, priority and SLA state.
 
+
+## Task 1 progress
+
+### DEFECT-117 — Filter changes not triggering requests
+
+**Root cause:** The ticket-list effect in `apps/web/src/features/tickets/hooks/useTicketList.ts` watched search, page and page size, but did not observe the other ticket filters. Changing Status therefore updated React state without triggering a new request to `GET /api/tickets`.
+
+**Fix:** The effect now tracks the complete filter state and schedules requests immediately when non-search filters change. Search-only changes retain the 300 ms debounce. This also allows future filters, such as Task 2's `slaStatus`, to trigger requests without adding a new effect dependency manually.
+
+**Regression test:** `apps/web/src/features/tickets/hooks/useTicketList.test.ts` includes a test that changes Status and asserts that a new API request includes the updated status. The test failed before the fix and passed afterward.
+
+**Verification performed so far:**
+
+```bash
+npm run test --workspace apps/web
+npm run typecheck --workspace apps/web
+npm run lint --workspace apps/web
+```
+
+The frontend tests passed (3 tests), the TypeScript type check completed without errors, and ESLint completed without reporting errors.
+
+### Server-side filtering — still to complete
+
+The API currently accepts ticket-list filter parameters, but the implementation and required backend regression tests are still in progress. To complete Task 1, apply status, priority, category, customer, assigned-agent, unassigned-only and trimmed search filters to the database query before counting and paging. Add tests for exact-match priority, combined filters, and searching by customer name. Verify that the returned count and pagination metadata describe the filtered result set.
+
 ## Troubleshooting
 
 | Symptom | Fix |
