@@ -109,6 +109,17 @@ and 40 tickets across every status, priority and SLA state.
 
 **Regression test:** `apps/web/src/features/tickets/hooks/useTicketList.test.ts` includes a test that changes Status and asserts that a new API request includes the updated status. The test failed before the fix and passed afterward.
 
+### Task 1.2 — Server-side filtering
+
+**Implementation:** `TicketQueries.GetPagedAsync()` applies `ApplyFilters()` to the ticket query before counting and paging. Filters are composed as Entity Framework Core query expressions so the database performs the filtering.
+
+**Supported filters:** Status, priority, category ID, customer ID, assigned agent ID, unassigned-only and search across ticket title, reference and customer name. Supplied filters combine using AND; search is trimmed and ignored when blank.
+
+**Pagination:** The filtered query is counted before sorting and paging, ensuring the result count and page metadata describe the matching tickets.
+
+**Testing:** SQLite in-memory query tests cover exact priority filtering, combined status and priority filters, customer-name search, other individual filters and pagination counts.
+
+**Verification:** Run `npm test`. In Development, inspect the API SQL logs to confirm that the filtering conditions appear in the database query before paging. The next filter should be added to `ApplyFilters()` without restructuring the query.
 **Verification performed so far:**
 
 ```bash

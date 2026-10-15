@@ -7,6 +7,8 @@ using SupportDesk.Domain.Aggregates.Categories;
 using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Infrastructure.Data;
+using System.Globalization;
+using Microsoft.Extensions.Configuration;
 
 namespace SupportDesk.Infrastructure.Queries;
 
@@ -14,13 +16,24 @@ namespace SupportDesk.Infrastructure.Queries;
 /// Ticket reads. Projected in the database and never tracked. Aggregates hold only each
 /// other's ids, so the customer, category and agent labels are joined in here, on the read side.
 /// </summary>
-public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQueries
+public sealed class TicketQueries(SupportDbContext db, IClock clock , IConfiguration? configuration = null) : ITicketQueries
 {
     /// <remarks>
     /// Sorts and pages every ticket. The filter values bound into <paramref name="query"/>
     /// (search, status, priority, category, customer, agent, unassigned-only) are not applied
     /// yet: server-side filtering is still to be built.
-    /// </remarks>
+    /// </remarks> 
+    
+    
+    private double AtRiskThresholdPercent =>
+        double.TryParse(
+            configuration?["Sla:AtRiskThresholdPercent"],
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var threshold)
+                ? threshold
+                : 25d;
+
     public async Task<PagedResult<TicketListItemDto>> GetPagedAsync(TicketQuery query, CancellationToken ct)
     {
         var tickets = ApplyFilters(TicketsWithLabels(), query);
@@ -46,7 +59,12 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc,
+                    x.Ticket.ResolvedAtUtc,
+                    x.Ticket.CreatedAtUtc,
+                    now,
+                    AtRiskThresholdPercent)
             })
             .ToListAsync(ct);
 
@@ -75,7 +93,12 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc,
+                    x.Ticket.ResolvedAtUtc,
+                    x.Ticket.CreatedAtUtc,
+                    now,
+                    AtRiskThresholdPercent)
             })
             .FirstOrDefaultAsync(ct);
     }
@@ -102,7 +125,12 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc,
+                    x.Ticket.ResolvedAtUtc,
+                    x.Ticket.CreatedAtUtc,
+                    now,
+                    AtRiskThresholdPercent)
             })
             .ToListAsync(ct);
     }

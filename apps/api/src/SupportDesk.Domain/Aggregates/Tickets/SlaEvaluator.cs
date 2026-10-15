@@ -1,15 +1,61 @@
+
 namespace SupportDesk.Domain.Aggregates.Tickets;
 
 /// <summary>
-/// Works out where a ticket stands against its due date. SLA status is always derived from
-/// the ticket's dates and the current time - never stored.
+/// Calculates SLA status from a ticket's dates and the current time.
+/// SLA status is derived and never stored.
 /// </summary>
 public static class SlaEvaluator
 {
-    public static SlaStatus Evaluate(DateTime? dueAtUtc, DateTime? resolvedAtUtc, DateTime nowUtc) =>
-        dueAtUtc is null ? SlaStatus.NotApplicable
-        : resolvedAtUtc is not null
-            ? (resolvedAtUtc <= dueAtUtc ? SlaStatus.Met : SlaStatus.Breached)
-        : nowUtc > dueAtUtc ? SlaStatus.Breached
-        : SlaStatus.WithinSla;
+    public static SlaStatus Evaluate(
+        DateTime? dueAtUtc,
+        DateTime? resolvedAtUtc,
+        DateTime slaWindowStartedAtUtc,
+        DateTime nowUtc,
+        double atRiskThresholdPercent)
+    {
+        if (dueAtUtc is null)
+        {
+            return SlaStatus.NotApplicable;
+        }
+
+        var due = dueAtUtc.Value;
+
+        if (resolvedAtUtc is not null)
+        {
+            return resolvedAtUtc.Value <= due
+                ? SlaStatus.Met
+                : SlaStatus.Breached;
+        }
+
+        if (nowUtc > due)
+        {
+            return SlaStatus.Breached;
+        }
+
+        var totalWindow = due - slaWindowStartedAtUtc;
+
+        if (totalWindow <= TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                "The SLA window must have a positive duration.",
+                nameof(slaWindowStartedAtUtc));
+        }
+
+        if (atRiskThresholdPercent is < 0 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(atRiskThresholdPercent),
+                "The threshold must be between 0 and 100.");
+        }
+
+        var remaining = due - nowUtc;
+
+        var remainingPercent =
+            remaining.TotalSeconds / totalWindow.TotalSeconds * 100;
+
+        return remainingPercent <= atRiskThresholdPercent
+            ? SlaStatus.AtRisk
+            : SlaStatus.WithinSla;
+    }
 }
