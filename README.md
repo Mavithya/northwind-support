@@ -86,9 +86,14 @@ docker compose config --quiet
 docker compose up --build -d
 docker compose ps
 docker compose logs --tail 100 api
+docker compose images api
 ```
 
-Swagger is available at <http://localhost:8080/swagger>. Stop containers while preserving the database with `docker compose down`; do not use `docker compose down -v` unless you intend to delete the volume.
+Swagger is available at [http://localhost:8080/swagger](http://localhost:8080/swagger). Stop the containers while preserving the database volume with:
+
+```powershell
+docker compose down
+```
 
 **Observed Docker result:** the image built; `supportdesk-sql` reported healthy; `supportdesk-api` started and listened on port 8080. Logs showed SQL connectivity, migrations already up to date, and the seed process skipping demo ticket seeding because ticket data already existed. The exact image-size output was not recorded; capture it with `docker compose images api` before submission.
 
