@@ -55,14 +55,7 @@ var jwtAudience =
 var jwtSigningKey =
     builder.Configuration["Authentication:Jwt:SigningKey"];
 
-// Fallback is for local Development only. Configure a private key for every
-// deployed environment; the development key must never be used in production.
-if (string.IsNullOrWhiteSpace(jwtSigningKey) &&
-    builder.Environment.IsDevelopment())
-{
-    jwtSigningKey =
-        "LOCAL-ONLY-Northwind-Support-Desk-signing-key-change-for-production";
-}
+
 
 if (string.IsNullOrWhiteSpace(jwtSigningKey) ||
     Encoding.UTF8.GetByteCount(jwtSigningKey) < 32)

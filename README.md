@@ -1,145 +1,157 @@
 # Northwind Support Desk
 
-A support ticket management system: raise tickets, search and filter them, assign them to agents,
-and move them through their lifecycle.
+A ticket-management API and React web application built for the Verdentra technical assessment. The solution focuses on server-side filtering, ticket triage and SLA rules, escalation history, and JWT-based authentication.
 
-**.NET 10 Web API** + **React 19 / TypeScript** + **SQL Server**, in one monorepo.
+> **Before submitting:** finish and verify the Docker steps described below; replace every `[VERIFY / FILL IN]` item with observed results; confirm the escalation actor is taken from the authenticated token (not a client-supplied form value); and confirm authentication is enforced centrally. Do not submit this draft with unresolved checks.
 
----
+## 1. Prerequisites
 
-## The assignment
+- .NET SDK 10
+- Node.js 20.19+ (Node 22 recommended)
+- Docker Desktop with Compose
 
-You are joining a team that already has this app working. Complete the tasks **in order**.
-Full requirements are in **[`ASSIGNMENT_CANDIDATE.md`](ASSIGNMENT_CANDIDATE.md)**.
+## 2. Run locally
 
-| # | Task | Done looks like | Effort |
-| --- | --- | --- | --- |
-| 1 | **Fix a defect, add server-side filtering** | Root cause fixed with a regression test; every list filter applied in the database with a correct count | ~2.5 h |
-| 2 | **Ticket escalation & assignment** | Automatic triage on create, escalation with history, SLA status, UI for all of it | ~7 h |
-| 3 | **Login and authentication** | Agents sign in; API rejects unauthenticated calls; login UI | ~4 h |
-| 4 | **Dockerise the API** *(optional)* | `docker compose up` gives a migrated, seeded API with no baked-in secret | ~1.5 h |
+From the repository root:
 
-### Guidance
-
-- **Time: 2 days.** Honestly marking a task "not finished" beats rushing all of them.
-- **Fork** this repo to your own GitHub account and work there. **Do not push to the original.**
-- **AI tools are allowed.** You must understand and be able to defend every line you submit.
-- **Commit as you go** and keep the real history. Commit the Task 1 defect fix and the filtering
-  separately from each other and from the feature work. A single squashed commit is not accepted.
-- **Where the spec is ambiguous**, make a decision, write it down in the README, and move on.
-- **Out of scope:** registration, password reset, roles, OAuth/SSO, refresh tokens, MFA,
-  notifications, CI, caching, visual redesign. Mention them under *Known limitations* instead.
-
-### Submission
-
-1. Update this **README** with what you built, your design decisions (chosen, rejected and why),
-   the defect's root cause, dev login credentials, how to run and test it, AI usage, and known
-   limitations. A reviewer must be able to run it without asking you anything.
-2. Add an **APPROACH.md** explaining your approach and thought process for each task.
-3. Commit both, then send us the **link to your fork**, the **dev login credentials**, and a
-   **rough note of time spent** on what. (If the fork is private, add the reviewers as collaborators.)
-
----
-
-## Quick start
-
-**Prerequisites:** .NET SDK 10 (`global.json`), Node.js 22 (`.nvmrc`; 20.19+ works), Docker.
-
-```bash
-cp .env.example .env          # optional, every value has a working default
-npm install                   # installs the web app
-npm run db:up                 # SQL Server 2022 in Docker on localhost:1433
-npm run api                   # terminal 1: migrates, seeds, then serves the API
-npm run web                   # terminal 2: React dev server
+```powershell
+npm install
+npm run db:up
 ```
 
-| What | Where |
-| --- | --- |
-| Web app | http://localhost:5173 |
-| API | https://localhost:7043 (also http://localhost:5043) |
-| Swagger | https://localhost:7043/swagger |
+Wait for SQL Server to become healthy. Configure local secrets for the API. The development bootstrap email is `admin@northwind-support.local`; the password is the assessment development password supplied separately with the submission and must be set locally as a secret.
 
-In Development the API applies migrations and seeds demo data on startup. **Never commit real
-credentials.**
-
-**Visual Studio 2026:** run `npm run db:up`, open `SupportDesk.sln`, set
-**SupportDesk.Presentation** as the startup project, and press F5 on the **https** profile.
-
-## Tests
-
-```bash
-npm test                      # dotnet test, then the web tests (Vitest)
+```powershell
+dotnet user-secrets set "Authentication:BootstrapAdminEmail" "admin@northwind-support.local" --project apps/api/src/SupportDesk.Presentation
+dotnet user-secrets set "Authentication:BootstrapAdminPassword" "<your-development-password>" --project apps/api/src/SupportDesk.Presentation
+dotnet user-secrets set "Authentication:Jwt:SigningKey" "<random-key-at-least-32-UTF-8-bytes>" --project apps/api/src/SupportDesk.Presentation
 ```
 
-Both pass on a clean checkout and neither needs a database.
+Do not commit the actual password or JWT signing key. Start the API and frontend in separate terminals:
 
-## Commands
+```powershell
+npm run api
+npm run web
+```
 
-| Command | What it does |
-| --- | --- |
-| `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe SQL Server |
-| `npm run api` / `npm run web` | Run the API / the React app |
-| `npm run build` | Build both |
-| `npm run lint` / `typecheck` / `format` | Web lint and types / `dotnet format` |
-| `npm run ef -- migrations add <Name>` | Add an EF Core migration |
+In Development, the API applies pending EF Core migrations and seeds demo ticket data at startup. Open the frontend URL printed by Vite (normally `http://localhost:5173`). Swagger is available under `/swagger` on the API's listening URL.
 
-## API at a glance
+## 3. Implemented behaviour
 
-| Endpoint | Description |
-| --- | --- |
-| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `sortBy`, `sortDirection`. **Filters are accepted but not applied yet** (Task 1). |
-| `GET /api/tickets/{id}` | One ticket |
-| `POST /api/tickets` | Create a ticket |
-| `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
-| `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
+### DEFECT-117: ticket filters
 
-Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict or business rule.
+The ticket list should fetch immediately when a non-search filter changes; free-text search remains debounced. The defect was caused by applying the debounce to filter changes generally, making status/priority/category/customer/assignment changes appear delayed. The hook now distinguishes a search-only change from changes to other filter fields, and the regression tests check that search waits for the debounce while other filters trigger a request immediately.
 
-**Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
-and 40 tickets across every status, priority and SLA state.
+### Server-side filtering and paging
 
+`TicketQueries.GetPagedAsync` composes the filters through `ApplyFilters` while the data is still an `IQueryable`. Filtering happens before `CountAsync`, sorting, `Skip`, and `Take`, so totals and page contents reflect the selected filters. Supported filters include status, priority, category, customer, assigned agent, unassigned-only, search across title/reference/customer name, and SLA status. Multiple filters combine with AND semantics. When adding a filter, add its typed field to `TicketQuery`/the frontend filter type, append it to the query string, add the predicate inside `ApplyFilters`, and add a regression test proving it composes with an existing filter.
 
-## Task 1 progress
+**SQL verification:** `[VERIFY / FILL IN: state how you checked the generated SQL, e.g. EF Core command logging or a SQL-backed query test, and the test/query used. Do not claim the SQL was inspected unless you did it.]`
 
-### DEFECT-117 — Filter changes not triggering requests
+### Triage, SLA, assignment, escalation
 
-**Root cause:** The ticket-list effect in `apps/web/src/features/tickets/hooks/useTicketList.ts` watched search, page and page size, but did not observe the other ticket filters. Changing Status therefore updated React state without triggering a new request to `GET /api/tickets`.
+- Requested priority defaults to Medium when omitted; categories configured to force Critical priority take precedence.
+- Base SLA response windows are Low 72 hours, Medium 24 hours, High 8 hours, and Critical 4 hours. Premium customers receive half the base window, with a one-hour minimum. The at-risk threshold defaults to 25% remaining and is configurable.
+- Assignment considers active agents, specialist qualifications when the category requires them, and capacity; when several agents qualify, the least-loaded agent is preferred with a stable ID tie-break. If no agent qualifies, the ticket can remain unassigned.
+- Escalation advances one priority level at a time, recalculates the SLA deadline and assignment decision, records a history row, and cannot be performed on Critical, Resolved, or Closed tickets. The reason is validated to 5–500 characters.
+- SLA status is derived from due time, resolution time, SLA-window start, current time, and the configured at-risk threshold; it is not stored as a separate mutable status.
 
-**Fix:** The effect now tracks the complete filter state and schedules requests immediately when non-search filters change. Search-only changes retain the 300 ms debounce. This also allows future filters, such as Task 2's `slaStatus`, to trigger requests without adding a new effect dependency manually.
+`[VERIFY BEFORE SUBMISSION: make sure the escalation actor is derived server-side from a validated JWT claim. The current request/earlier UI included an EscalatedBy field supplied by the client; that is not suitable for the final security requirement. Remove it from the trusted request contract and use the authenticated principal instead.]`
 
-**Regression test:** `apps/web/src/features/tickets/hooks/useTicketList.test.ts` includes a test that changes Status and asserts that a new API request includes the updated status. The test failed before the fix and passed afterward.
+## 4. Authentication and security
 
-### Task 1.2 — Server-side filtering
+The login endpoint is `POST /api/auth/login`. Successful login returns a bearer access token, expiration time, and user profile. Invalid email/password and inactive-account cases should return the same generic authentication failure. Passwords are stored as salted PBKDF2-SHA256 hashes (600,000 iterations, 16-byte random salt, 32-byte derived hash); plaintext passwords are not stored.
 
-**Implementation:** `TicketQueries.GetPagedAsync()` applies `ApplyFilters()` to the ticket query before counting and paging. Filters are composed as Entity Framework Core query expressions so the database performs the filtering.
+The JWT uses issuer, audience, expiration, and a signing key configured outside source control. The development signing key is stored using .NET User Secrets for local runs and environment variables for Docker. Do not bake credentials or signing keys into the image or repository. The frontend currently stores the session in `sessionStorage`, attaches the token as `Authorization: Bearer ...`, and clears local session state on logout or an unauthorized response. `sessionStorage` is accessible to JavaScript and remains vulnerable to XSS; an `HttpOnly; Secure; SameSite` cookie-based session is a stronger production option.
 
-**Supported filters:** Status, priority, category ID, customer ID, assigned agent ID, unassigned-only and search across ticket title, reference and customer name. Supplied filters combine using AND; search is trimmed and ignored when blank.
+**Authorization verification:** `[VERIFY BEFORE SUBMISSION: protected API endpoints must require authentication by default (prefer a central fallback policy), with only the login endpoint allowing anonymous access. Test that an unauthenticated request receives 401 and a valid token succeeds.]`
 
-**Pagination:** The filtered query is counted before sorting and paging, ensuring the result count and page metadata describe the matching tickets.
+### Development login
 
-**Testing:** SQLite in-memory query tests cover exact priority filtering, combined status and priority filters, customer-name search, other individual filters and pagination counts.
+- Email: `admin@northwind-support.local`
+- Password: supplied separately in the assessment submission email; locally set it as `Authentication:BootstrapAdminPassword` (User Secrets) or `BOOTSTRAP_ADMIN_PASSWORD` (Docker `.env`).
 
-**Verification:** Run `npm test`. In Development, inspect the API SQL logs to confirm that the filtering conditions appear in the database query before paging. The next filter should be added to `ApplyFilters()` without restructuring the query.
-**Verification performed so far:**
+The development account is created only when both bootstrap email and password are configured and the email does not already exist. The seed process does not overwrite an existing password. Use a throwaway assessment credential, not a personal or production password.
 
-```bash
-npm run test --workspace apps/web
+## 5. Database changes
+
+- `SupportUsers`: stores application users and password hashes. A unique index on `Email` prevents duplicate login identities.
+- `TicketEscalations`: stores the priority/assignment/SLA changes and reason for each escalation. An index on `TicketId` supports loading a ticket's history.
+- EF Core migrations are maintained in `SupportDesk.Infrastructure/Data/Migrations`. Do not delete the database volume to apply a schema change; apply the migration so existing tickets are preserved.
+- Ticket read queries use `AsNoTracking` and database-side joins/projections. Filters are added before count and paging to avoid returning an unfiltered page and filtering in memory.
+
+## 6. Design decisions
+
+1. **Domain behaviour in entities/services:** priority progression and ticket-state constraints belong to the domain, while triage decisions are grouped in a testable service shared by ticket creation/escalation. This avoids duplicating SLA/assignment rules in controllers.
+2. **Repository and unit of work:** repositories are used at the persistence boundary, and the ticket update plus escalation-history record are saved through one unit of work. This allows the workflow to be tested without coupling handlers to EF Core.
+3. **Query object / IQueryable composition:** `TicketQuery` carries filter, sorting, and paging inputs; `TicketQueries` builds composable database expressions and projects only the fields needed by the list. This keeps filtering in SQL and avoids N+1 navigation loading.
+
+The application uses command/query handlers for focused use cases, but does not introduce a separate messaging bus or a full CQRS infrastructure because this assessment does not need that complexity.
+
+## 7. Docker: build and run
+
+`[VERIFY / FILL IN AFTER THE DOCKER FILES ARE IMPLEMENTED AND TESTED]`
+
+The intended local setup uses a multi-stage .NET 10 Dockerfile: SDK image for restore/build/publish and ASP.NET runtime image for execution. Compose runs SQL Server and the API on the same private network. From inside the API container, the SQL Server address must be `sqlserver,1433` (not `localhost,14330`); port `14330` is the host port for local tools.
+
+Expected commands once `Dockerfile`, `.dockerignore`, and the API service in `docker-compose.yml` are present:
+
+```powershell
+docker compose config --quiet
+docker compose up --build -d
+docker compose ps
+docker compose logs --tail 100 api
+```
+
+Swagger should then be reachable on the host port configured in Compose. Stop without deleting database data with `docker compose down`.
+
+- **Image size:** `[FILL IN AFTER RUNNING docker compose images api]` once the final image is built; record the observed size, not an estimate.
+- **Secrets:** supply `JWT_SIGNING_KEY`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, and the SQL Server password at runtime via an ignored local `.env` or deployment secret store. Keep `.env` out of Git.
+- **Development vs production:** Development currently applies migrations and seeds demo rows at API startup and exposes Swagger. For production, run migrations as a deliberate deployment step (e.g. a reviewed, versioned SQL migration or a one-off migration job), disable development seeding/Swagger, use HTTPS, set restrictive CORS, and use a proper secret manager. Do not let each application replica race to migrate on startup.
+- **Container user:** `[VERIFY the final Dockerfile uses the non-root runtime user and that the container starts successfully.]`
+
+## 8. Testing and verification
+
+Run from the repository root:
+
+```powershell
 npm run typecheck --workspace apps/web
 npm run lint --workspace apps/web
+npm test
+npm run build
 ```
 
-The frontend tests passed (3 tests), the TypeScript type check completed without errors, and ESLint completed without reporting errors.
+The frontend tests cover the ticket list hook's debounced search and immediate filter changes, ticket table rendering, and escalation panel history/submission. The API has unit and architecture test projects. Manual verification performed so far: login endpoint returned HTTP 200 in Swagger for the development admin account.
 
-### Server-side filtering — still to complete
+`[VERIFY BEFORE SUBMISSION: record the final test/build results after all auth and Docker changes. Add automated authentication tests for correct credentials, incorrect credentials, inactive accounts, token validation, and unauthenticated access to protected endpoints. State any tests that are not implemented rather than claiming them.]`
 
-The API currently accepts ticket-list filter parameters, but the implementation and required backend regression tests are still in progress. To complete Task 1, apply status, priority, category, customer, assigned-agent, unassigned-only and trimmed search filters to the database query before counting and paging. Add tests for exact-match priority, combined filters, and searching by customer name. Verify that the returned count and pagination metadata describe the filtered result set.
+## 9. AI assistance and verification
 
-## Troubleshooting
+AI tools were used as a coding assistant to reason through the filter debounce defect, outline server-side query composition, draft triage/escalation/authentication changes, and help diagnose TypeScript/ESLint/build issues. The workflow was to inspect the actual files and error output, make a focused change, then run type checking, linting, tests, build, or a manual HTTP/Swagger check.
 
-| Symptom | Fix |
-| --- | --- |
-| API cannot reach the database | `npm run db:up`, wait ~20 s, check `docker compose ps` |
-| Port 1433 already in use | Change the port in `docker-compose.yml` and `.env` |
-| Browser warns about the certificate | `dotnet dev-certs https --trust`, or use the web app, which proxies |
-| Web app shows "Unable to load tickets" | The API is not running, or `VITE_API_PROXY_TARGET` points at the wrong port |
-| SQL Server slow on Apple Silicon | Enable Rosetta in Docker Desktop → Settings → General |
+Examples of verification and corrections:
+
+- The React Hooks purity lint rule rejected calling `Date.now()` during render; the expiry check was moved into an effect/timer rather than disabling the rule.
+- Import paths for `AuthContext`/`RequireAuth` needed correction after the initial placement did not match the repository layout.
+- A frontend regression test was added for immediate SLA filter changes rather than relying only on a manual click-through.
+
+`[PERSONALIZE BEFORE SUBMISSION: add an actual example of a suggestion you rejected or changed, one bug introduced or exposed by AI-generated code, and the exact test/run that verified the correction. Use your own words and only describe what really happened.]`
+
+## 10. Known limitations and follow-ups
+
+- Browser `sessionStorage` is vulnerable to script access if an XSS flaw exists; production should consider an `HttpOnly` cookie-based design and stronger CSRF/XSS protections appropriate to that architecture.
+- Access-token revocation/refresh, login rate limiting, and account lockout are not implemented unless added separately.
+- Role claims are issued, but role-specific permissions need explicit policies if Admin and SupportAgent should have different capabilities.
+- Docker is a local assessment/development configuration until the final image, health, secrets, non-root execution, and migration strategy have been verified. It is not a production deployment recipe without the hardening listed above.
+
+## 11. Assessment submission checklist
+
+- [ ] Finish the actor-from-token and central authorization requirements.
+- [ ] Verify Docker build/run, non-root execution, runtime secrets, migration behaviour, and observed image size.
+- [ ] Replace all `[VERIFY / FILL IN]` notes and personalize the AI-use section honestly.
+- [ ] Run typecheck, lint, all .NET/frontend tests, and full build; record the actual results.
+- [ ] Ensure `.env`, User Secrets, passwords, and JWT signing keys are not staged or committed.
+- [ ] Confirm defect and filtering work remain in separate focused commits; preserve the real history.
+- [ ] Confirm `origin` points to your own fork, not the upstream assessment repository.
+- [ ] Push the verified commits to your fork. For a private fork, add `madura@verdentra.com` and `pandukal@verdentra.com` as collaborators.
+- [ ] Email the fork URL, development login credentials, and an honest estimate of time spent by area.
