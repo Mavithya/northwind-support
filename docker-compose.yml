@@ -1,5 +1,3 @@
-# SQL Server for local development only. The password below is a throwaway local
-# placeholder - never commit a real credential.
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -9,7 +7,7 @@ services:
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Local_Dev_Password1}"
       MSSQL_PID: Developer
     ports:
-      - "1433:1433"
+      - "14330:1433"
     volumes:
       - supportdesk-sql:/var/opt/mssql
     healthcheck:
@@ -22,6 +20,32 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supportdesk-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=SupportDesk;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Local_Dev_Password1};Encrypt=False;TrustServerCertificate=True"
+
+      Authentication__Jwt__Issuer: "NorthwindSupportDesk"
+      Authentication__Jwt__Audience: "NorthwindSupportDeskWeb"
+      Authentication__Jwt__SigningKey: "${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}"
+      Authentication__Jwt__ExpirationMinutes: "60"
+
+      Authentication__BootstrapAdminEmail: "${BOOTSTRAP_ADMIN_EMAIL:?Set BOOTSTRAP_ADMIN_EMAIL in .env}"
+      Authentication__BootstrapAdminPassword: "${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}"
+
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
 
 volumes:
   supportdesk-sql:

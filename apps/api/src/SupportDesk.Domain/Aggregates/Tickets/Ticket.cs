@@ -106,9 +106,53 @@ public sealed class Ticket : AggregateRoot
     /// Hands the ticket to an agent, or takes it back off them when <paramref name="agentId"/>
     /// is null. Whether the agent may take it is checked by the caller, which can see agents.
     /// </summary>
+
+    public void SetDueAtUtc(DateTime dueAtUtc, DateTime nowUtc)
+    {
+        DueAtUtc = dueAtUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+    
     public void AssignTo(int? agentId, DateTime nowUtc)
     {
         AssignedAgentId = agentId;
         UpdatedAtUtc = nowUtc;
     }
+
+    
+/// <summary>
+/// Escalates an open ticket by exactly one priority level.
+/// </summary>
+public void EscalateTo(
+    TicketPriority newPriority,
+    int? assignedAgentId,
+    DateTime dueAtUtc,
+    DateTime nowUtc)
+{
+    if (Priority == TicketPriority.Critical)
+    {
+        throw new BusinessRuleViolationException(
+            "Critical tickets cannot be escalated.");
+    }
+
+    if (Status is TicketStatus.Resolved or TicketStatus.Closed)
+    {
+        throw new BusinessRuleViolationException(
+            $"Tickets in {Status} status cannot be escalated.");
+    }
+
+    var expectedPriority = (TicketPriority)((int)Priority + 1);
+
+    if (newPriority != expectedPriority)
+    {
+        throw new BusinessRuleViolationException(
+            "Escalation must increase priority by exactly one level.");
+    }
+
+    Priority = newPriority;
+    AssignedAgentId = assignedAgentId;
+    DueAtUtc = dueAtUtc;
+    UpdatedAtUtc = nowUtc;
+}
+
 }

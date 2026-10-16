@@ -5,6 +5,9 @@ using SupportDesk.Domain.Aggregates.Agents;
 using SupportDesk.Domain.Aggregates.Categories;
 using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
+using Microsoft.Extensions.Configuration;
+using SupportDesk.Application.Abstractions;
+using SupportDesk.Domain.Aggregates.Users;
 
 namespace SupportDesk.Infrastructure.Data;
 
@@ -17,11 +20,18 @@ namespace SupportDesk.Infrastructure.Data;
 /// Every aggregate is built through its own behaviour. The two historical values no behaviour
 /// produces - a ticket's last update and its due date - are set through EF Core directly.
 /// </remarks>
-public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<SupportDbSeeder> logger)
+public sealed class SupportDbSeeder(
+    SupportDbContext db,
+    IClock clock,
+    ILogger<SupportDbSeeder> logger,
+    IConfiguration configuration,
+    IPasswordHasher passwordHasher)
 {
     /// <summary>Seeds the database, unless it already has tickets in it.</summary>
     public async Task SeedAsync(CancellationToken ct = default)
     {
+        await SeedBootstrapAdminAsync(ct);
+
         if (await db.Set<Ticket>().AnyAsync(ct))
         {
             logger.LogInformation("Seed data already present; skipping.");
@@ -210,4 +220,47 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
         int CreatedMinutesAgo,
         int SlaWindowMinutes,
         int? ResolvedAfterMinutes);
+
+
+    private async Task SeedBootstrapAdminAsync(CancellationToken ct)
+    {
+        var email = configuration["Authentication:BootstrapAdminEmail"]?.Trim();
+        var password = configuration["Authentication:BootstrapAdminPassword"];
+
+        if (string.IsNullOrWhiteSpace(email) &&
+            string.IsNullOrEmpty(password))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(email) ||
+            string.IsNullOrEmpty(password))
+        {
+            throw new InvalidOperationException(
+                "Set both Authentication:BootstrapAdminEmail and " +
+                "Authentication:BootstrapAdminPassword to bootstrap the development account.");
+        }
+
+        var normalizedEmail = email.ToLowerInvariant();
+
+        if (await db.Set<SupportUser>()
+            .AnyAsync(user => user.Email == normalizedEmail, ct))
+        {
+            return;
+        }
+
+        var user = new SupportUser(
+            normalizedEmail,
+            "Northwind Administrator",
+            passwordHasher.Hash(password),
+            "Admin",
+            clock.UtcNow);
+
+        await db.Set<SupportUser>().AddAsync(user, ct);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "Created development support account {Email}.",
+            normalizedEmail);
+    }
 }
