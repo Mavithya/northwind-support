@@ -44,4 +44,6 @@ public sealed record TicketQuery
         Page = Page < 1 ? 1 : Page,
         PageSize = PageSize < 1 ? 20 : Math.Min(PageSize, MaxPageSize)
     };
+
+    public SlaStatus? SlaStatus { get; init; }
 }

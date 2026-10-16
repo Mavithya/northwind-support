@@ -9,7 +9,7 @@ services:
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Local_Dev_Password1}"
       MSSQL_PID: Developer
     ports:
-      - "1433:1433"
+      - "14330:1433"
     volumes:
       - supportdesk-sql:/var/opt/mssql
     healthcheck:

@@ -10,6 +10,7 @@ using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Domain.Repositories;
 using SupportDesk.UnitTests.TestDoubles;
+using SupportDesk.Domain.Aggregates.Categories;
 
 namespace SupportDesk.UnitTests.Application.Features.Tickets.Commands;
 
@@ -46,8 +47,40 @@ internal sealed class TicketCommandTestContext
 
         var getTicket = new GetTicketQueryHandler(TicketQueries.Object);
 
+        Customers.Setup(c => c.GetByIdAsync(
+                1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Customer(
+                "Contoso Ltd",
+                "support@contoso.example",
+                null,
+                CustomerTier.Premium,
+                Clock.UtcNow));
+
+        Categories.Setup(c => c.GetByIdAsync(
+                3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Category("General", false, false));
+
+        Tickets.Setup(t => t.GetOpenTicketCountsByAgentAsync(
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<int, int>());
+
+        Agents.Setup(a => a.GetAllForAssignmentAsync(
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Agent>());
+
+        var triage = new TicketTriageService(
+            Tickets.Object,
+            Customers.Object,
+            Categories.Object,
+            Agents.Object,
+            Clock,
+            new TicketTriageOptions());
+
         RaiseTicket = new RaiseTicketCommandHandler(
-            Tickets.Object, Customers.Object, Categories.Object, UnitOfWork.Object, Clock, getTicket,
+            Tickets.Object,
+            UnitOfWork.Object,
+            getTicket,
+            triage,
             NullLogger<RaiseTicketCommandHandler>.Instance);
 
         ChangeTicketStatus = new ChangeTicketStatusCommandHandler(Tickets.Object, UnitOfWork.Object, Clock, getTicket);

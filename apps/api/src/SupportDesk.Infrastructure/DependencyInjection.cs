@@ -25,7 +25,19 @@ public static class DependencyInjection
                 "Connection string 'Default' is missing. See README.md for local setup.");
 
         services.AddDbContext<SupportDbContext>(options =>
-            options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure()));
+            options.UseSqlServer(connectionString, sql =>
+            {
+                // Retry up to 3 times with a short cap so startup fails fast if SQL
+                // Server is genuinely unreachable rather than hanging for minutes.
+                sql.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorNumbersToAdd: null);
+
+                // Give each individual command 90 s so the first TDS handshake through
+                // Docker Desktop's port-proxy has time to complete.
+                sql.CommandTimeout(90);
+            }));
 
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<SupportDbContext>());
 
@@ -42,6 +54,8 @@ public static class DependencyInjection
         services.AddScoped<ICategoryQueries, CategoryQueries>();
 
         services.AddScoped<SupportDbSeeder>();
+
+        services.AddScoped<ITicketEscalationRepository,TicketEscalationRepository>();
 
         return services;
     }

@@ -43,6 +43,12 @@ public class RaiseTicketCommandHandlerTests
     {
         var context = new TicketCommandTestContext();
         context.Customers
+            .Setup(c => c.GetByIdAsync(
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SupportDesk.Domain.Aggregates.Customers.Customer?)null);
+
+        context.Customers
             .Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -52,4 +58,7 @@ public class RaiseTicketCommandHandlerTests
         Assert.Contains("Customer", exception.Message);
         context.VerifySaved(Times.Never());
     }
+
+
+    
 }

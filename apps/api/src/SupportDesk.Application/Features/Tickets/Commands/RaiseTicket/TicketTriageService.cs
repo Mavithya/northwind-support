@@ -10,6 +10,7 @@ using SupportDesk.Domain.Repositories;
 namespace SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
 
 public sealed record TicketTriageDecision(
+    DateTime CreatedAtUtc,
     TicketPriority Priority,
     int? AssignedAgentId,
     DateTime DueAtUtc,
@@ -18,9 +19,6 @@ public sealed record TicketTriageDecision(
     string SlaReason,
     string AssignmentReason);
 
-/// <summary>
-/// Determines the priority, SLA deadline and eligible owner of a new ticket.
-/// </summary>
 public sealed class TicketTriageService(
     ITicketRepository tickets,
     ICustomerRepository customers,
@@ -48,14 +46,81 @@ public sealed class TicketTriageService(
         var priorityReason = category.ForcesCriticalPriority
             ? $"The {category.Name} category requires Critical priority."
             : requestedPriority is null
-                ? "No priority was requested, so Medium priority was selected."
+                ? "No priority was requested; Medium was selected."
                 : $"The requested {priority} priority was retained.";
 
-        if (!options.BaseWindowHours.TryGetValue(priority.ToString(), out var baseHours)
+        var now = clock.UtcNow;
+        var (baseHours, windowHours) =
+            CalculateWindow(customer.Tier, priority);
+
+        var dueAtUtc = now.AddHours(windowHours);
+
+        var assignment = await SelectAgentAsync(
+            category, null, ct);
+
+        return new TicketTriageDecision(
+            now,
+            priority,
+            assignment.Agent?.Id,
+            dueAtUtc,
+            windowHours,
+            priorityReason,
+            BuildSlaReason(customer.Tier, baseHours, windowHours),
+            assignment.Reason);
+    }
+
+    public async Task<TicketTriageDecision> DecideEscalationAsync(
+        int customerId,
+        int categoryId,
+        TicketPriority currentPriority,
+        int? currentAgentId,
+        CancellationToken ct)
+    {
+        if (currentPriority == TicketPriority.Critical)
+        {
+            throw new ConflictException(
+                "Critical tickets cannot be escalated.");
+        }
+
+        var customer = await customers.GetByIdAsync(customerId, ct)
+            ?? throw new NotFoundException("Customer", customerId);
+
+        var category = await categories.GetByIdAsync(categoryId, ct)
+            ?? throw new NotFoundException("Category", categoryId);
+
+        var newPriority =
+            (TicketPriority)((int)currentPriority + 1);
+
+        var now = clock.UtcNow;
+        var (baseHours, windowHours) =
+            CalculateWindow(customer.Tier, newPriority);
+
+        var dueAtUtc = now.AddHours(windowHours);
+
+        var assignment = await SelectAgentAsync(
+            category, currentAgentId, ct);
+
+        return new TicketTriageDecision(
+            now,
+            newPriority,
+            assignment.Agent?.Id,
+            dueAtUtc,
+            windowHours,
+            $"Priority increased from {currentPriority} to {newPriority}.",
+            BuildSlaReason(customer.Tier, baseHours, windowHours),
+            assignment.Reason);
+    }
+
+    private (double BaseHours, double EffectiveHours) CalculateWindow(
+        CustomerTier tier,
+        TicketPriority priority)
+    {
+        if (!options.BaseWindowHours.TryGetValue(
+                priority.ToString(), out var baseHours)
             || baseHours <= 0)
         {
             throw new InvalidOperationException(
-                $"A positive SLA window must be configured for {priority} priority.");
+                $"A valid SLA window must be configured for {priority}.");
         }
 
         if (options.PremiumCustomerMultiplier <= 0
@@ -65,56 +130,88 @@ public sealed class TicketTriageService(
                 "The Premium multiplier and minimum SLA window must be positive.");
         }
 
-        var windowHours = customer.Tier == CustomerTier.Premium
+        var effectiveHours = tier == CustomerTier.Premium
             ? Math.Max(
                 baseHours * options.PremiumCustomerMultiplier,
                 options.MinimumWindowHours)
             : baseHours;
 
-        var now = clock.UtcNow;
-        var dueAtUtc = now.AddHours(windowHours);
+        return (baseHours, effectiveHours);
+    }
 
-        var slaReason = customer.Tier == CustomerTier.Premium
+    private static string BuildSlaReason(
+        CustomerTier tier,
+        double baseHours,
+        double effectiveHours) =>
+        tier == CustomerTier.Premium
             ? $"Base window {baseHours} hours; Premium multiplier "
-                + $"{options.PremiumCustomerMultiplier}; effective window "
-                + $"{windowHours} hours, including the minimum-window rule."
-            : $"The {priority} priority has a {windowHours}-hour SLA window "
-                + $"for a Standard customer.";
+                + $"applied with the minimum-window rule; effective "
+                + $"window {effectiveHours} hours."
+            : $"Base and effective SLA window: {effectiveHours} hours "
+                + "for a Standard customer.";
 
-        var openCounts = await tickets.GetOpenTicketCountsByAgentAsync(ct);
-        var allAgents = await agents.GetAllForAssignmentAsync(ct);
+    private async Task<(Agent? Agent, string Reason)> SelectAgentAsync(
+        Category category,
+        int? currentAgentId,
+        CancellationToken ct)
+    {
+        var openCounts =
+            await tickets.GetOpenTicketCountsByAgentAsync(ct);
+
+        var allAgents =
+            await agents.GetAllForAssignmentAsync(ct);
+
+        bool HasSpecialization(Agent agent) =>
+            !category.RequiresSpecialist
+            || agent.Specializations.Any(
+                s => s.CategoryId == category.Id);
+
+        // During escalation, preserve the current agent if still eligible.
+        // Their count includes the ticket currently being escalated.
+        if (currentAgentId.HasValue)
+        {
+            var current = allAgents.FirstOrDefault(
+                a => a.Id == currentAgentId.Value);
+
+            var currentCount =
+                openCounts.GetValueOrDefault(currentAgentId.Value);
+
+            if (current is not null
+                && current.IsActive
+                && HasSpecialization(current)
+                && currentCount <= current.MaxOpenTickets)
+            {
+                return (
+                    current,
+                    $"Kept {current.FullName}; the agent remains active, "
+                    + "qualified and within capacity.");
+            }
+        }
 
         var selected = allAgents
             .Select(agent => new
             {
                 Agent = agent,
-                OpenCount = openCounts.TryGetValue(agent.Id, out var count)
-                    ? count
-                    : 0
+                OpenCount = openCounts.GetValueOrDefault(agent.Id)
             })
             .Where(x => x.Agent.IsActive)
-            .Where(x =>
-                !category.RequiresSpecialist
-                || x.Agent.Specializations.Any(
-                    s => s.CategoryId == category.Id))
+            .Where(x => HasSpecialization(x.Agent))
             .Where(x => x.OpenCount < x.Agent.MaxOpenTickets)
             .OrderBy(x => x.OpenCount)
             .ThenBy(x => x.Agent.Id)
             .FirstOrDefault();
 
-        var assignmentReason = selected is null
-            ? "No active agent with the required specialization and available "
-                + "capacity was eligible. The ticket will remain unassigned."
-            : $"{selected.Agent.FullName} was selected because they are eligible, "
-                + $"have {selected.OpenCount} open tickets and have available capacity.";
+        if (selected is null)
+        {
+            return (
+                null,
+                "No active agent with the required specialization and "
+                + "available capacity was eligible. The ticket remains unassigned.");
+        }
 
-        return new TicketTriageDecision(
-            priority,
-            selected?.Agent.Id,
-            dueAtUtc,
-            windowHours,
-            priorityReason,
-            slaReason,
-            assignmentReason);
+        return (
+            selected.Agent,
+            $"{selected.Agent.FullName} was selected with "
+            + $"{selected.OpenCount} open tickets and available capacity.");
     }
 }
