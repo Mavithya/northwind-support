@@ -5,6 +5,11 @@ using SupportDesk.Presentation.Extensions;
 using SupportDesk.Presentation.Filters;
 using SupportDesk.Presentation.Middleware;
 using SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using SupportDesk.Application.Abstractions;
+using SupportDesk.Presentation.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +44,79 @@ var slaOptions = builder.Configuration
 
 builder.Services.AddSingleton(slaOptions);
 
+var jwtIssuer =
+    builder.Configuration["Authentication:Jwt:Issuer"]
+    ?? "NorthwindSupportDesk";
+
+var jwtAudience =
+    builder.Configuration["Authentication:Jwt:Audience"]
+    ?? "NorthwindSupportDeskWeb";
+
+var jwtSigningKey =
+    builder.Configuration["Authentication:Jwt:SigningKey"];
+
+// Fallback is for local Development only. Configure a private key for every
+// deployed environment; the development key must never be used in production.
+if (string.IsNullOrWhiteSpace(jwtSigningKey) &&
+    builder.Environment.IsDevelopment())
+{
+    jwtSigningKey =
+        "LOCAL-ONLY-Northwind-Support-Desk-signing-key-change-for-production";
+}
+
+if (string.IsNullOrWhiteSpace(jwtSigningKey) ||
+    Encoding.UTF8.GetByteCount(jwtSigningKey) < 32)
+{
+    throw new InvalidOperationException(
+        "Authentication:Jwt:SigningKey must contain at least 32 UTF-8 bytes.");
+}
+
+var expirationMinutes =
+    int.TryParse(
+        builder.Configuration["Authentication:Jwt:ExpirationMinutes"],
+        out var configuredMinutes) &&
+    configuredMinutes > 0
+        ? configuredMinutes
+        : 60;
+
+var jwtOptions = new JwtAuthOptions(
+    jwtIssuer,
+    jwtAudience,
+    jwtSigningKey,
+    expirationMinutes);
+
+builder.Services.AddSingleton(jwtOptions);
+
+builder.Services.AddScoped<IAuthTokenService, JwtAuthTokenService>();
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
+
+            ValidateIssuer = true,
+            ValidIssuer = jwtOptions.Issuer,
+
+            ValidateAudience = true,
+            ValidAudience = jwtOptions.Audience,
+
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30),
+
+            NameClaimType = "name",
+            RoleClaimType = "role"
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -53,6 +131,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors(FrontendCorsPolicy);
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

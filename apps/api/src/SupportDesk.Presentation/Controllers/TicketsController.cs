@@ -8,10 +8,12 @@ using SupportDesk.Application.Features.Tickets.Queries.GetTicket;
 using SupportDesk.Application.Features.Tickets.Queries.SearchTickets;
 using SupportDesk.Application.Features.Tickets.Commands.EscalateTicket;
 using SupportDesk.Application.Features.Tickets.Queries.GetTicketEscalations;
+using Microsoft.AspNetCore.Authorization;
 
 namespace SupportDesk.Presentation.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/tickets")]
 [Produces("application/json")]
 public sealed class TicketsController : ControllerBase

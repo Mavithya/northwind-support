@@ -7,6 +7,7 @@ using SupportDesk.Infrastructure.Data;
 using SupportDesk.Infrastructure.Queries;
 using SupportDesk.Infrastructure.Repositories;
 using SupportDesk.Infrastructure.Services;
+using SupportDesk.Application.Abstractions;
 
 namespace SupportDesk.Infrastructure;
 
@@ -56,6 +57,9 @@ public static class DependencyInjection
         services.AddScoped<SupportDbSeeder>();
 
         services.AddScoped<ITicketEscalationRepository,TicketEscalationRepository>();
+
+        services.AddScoped<IAuthUserRepository, AuthUserRepository>();
+        services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 
         return services;
     }

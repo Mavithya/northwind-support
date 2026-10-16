@@ -286,6 +286,49 @@ namespace SupportDesk.Infrastructure.Data.Migrations
                     b.ToTable("TicketEscalations", (string)null);
                 });
 
+            modelBuilder.Entity("SupportDesk.Domain.Aggregates.Users.SupportUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_SupportUsers_Email");
+
+                    b.ToTable("SupportUsers", (string)null);
+                });
+
             modelBuilder.Entity("SupportDesk.Domain.Aggregates.Agents.AgentSpecialization", b =>
                 {
                     b.HasOne("SupportDesk.Domain.Aggregates.Agents.Agent", null)
